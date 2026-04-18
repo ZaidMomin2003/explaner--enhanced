@@ -83,3 +83,66 @@ export function extractComponentCode(code: string): string {
   // Fallback: return as-is
   return code;
 }
+
+
+/**
+ * Detect the required duration (in frames) from generated code by scanning
+ * for numeric literals used in frame-related patterns like interpolate ranges,
+ * Sequence from/durationInFrames, and section visibility helpers.
+ * Returns a sensible durationInFrames with a small buffer, or a default if
+ * no frame references are found.
+ */
+export function detectDurationFromCode(
+  code: string,
+  defaultDuration = 150,
+): number {
+  let maxFrame = 0;
+
+  // Match interpolate(frame, [start, ..., end], ...)
+  const interpolateRegex =
+    /interpolate\s*\(\s*(?:frame|f)\s*,\s*\[([^\]]+)\]/g;
+  let match;
+  while ((match = interpolateRegex.exec(code)) !== null) {
+    const nums = match[1].match(/\d+/g);
+    if (nums) {
+      for (const n of nums) {
+        maxFrame = Math.max(maxFrame, parseInt(n, 10));
+      }
+    }
+  }
+
+  // Match sectionVisible(start, end) or similar two-arg helpers with numeric literals
+  const sectionRegex = /sectionVisible\s*\(\s*(\d+)\s*,\s*(\d+)\s*\)/g;
+  while ((match = sectionRegex.exec(code)) !== null) {
+    maxFrame = Math.max(maxFrame, parseInt(match[2], 10));
+  }
+
+  // Match Sequence from={number} or durationInFrames={number}
+  const seqFromRegex = /from\s*=\s*\{?\s*(\d+)\s*\}?/g;
+  while ((match = seqFromRegex.exec(code)) !== null) {
+    maxFrame = Math.max(maxFrame, parseInt(match[1], 10));
+  }
+  const seqDurRegex = /durationInFrames\s*=\s*\{?\s*(\d+)\s*\}?/g;
+  while ((match = seqDurRegex.exec(code)) !== null) {
+    maxFrame = Math.max(maxFrame, parseInt(match[1], 10));
+  }
+
+  // Match spring/enter calls with frame delay: enter(number) or spring({ frame: t(number)
+  const enterRegex = /enter\s*\(\s*(\d+)/g;
+  while ((match = enterRegex.exec(code)) !== null) {
+    maxFrame = Math.max(maxFrame, parseInt(match[1], 10));
+  }
+
+  // Match t(number) helper pattern
+  const tHelperRegex = /\bt\s*\(\s*(\d+)\s*\)/g;
+  while ((match = tHelperRegex.exec(code)) !== null) {
+    maxFrame = Math.max(maxFrame, parseInt(match[1], 10));
+  }
+
+  if (maxFrame > 0) {
+    // Add a 10% buffer so the last animation has time to complete
+    return Math.ceil(maxFrame * 1.1);
+  }
+
+  return defaultDuration;
+}

@@ -110,6 +110,7 @@ export function useGenerationApi(): UseGenerationApiReturn {
         onMessageSent?.(prompt, frameImages);
       }
 
+      console.log("Attempting 4.6 Invoke via:", model);
       try {
         const response = await fetch("/api/generate", {
           method: "POST",

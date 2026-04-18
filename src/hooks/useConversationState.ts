@@ -5,15 +5,57 @@ import type {
   ConversationState,
   EditOperation,
 } from "@/types/conversation";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+
+const STORAGE_KEY = "explainer-conversation";
+
+function loadPersistedState(): ConversationState | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as ConversationState;
+    // Restore without pendingMessage (transient state)
+    return { ...parsed, pendingMessage: undefined };
+  } catch {
+    return null;
+  }
+}
+
+function persistState(state: ConversationState) {
+  if (typeof window === "undefined") return;
+  try {
+    // Strip large fields (attachedImages, codeSnapshot) to keep localStorage small
+    const lightweight: ConversationState = {
+      ...state,
+      pendingMessage: undefined,
+      messages: state.messages.map((m) => ({
+        ...m,
+        attachedImages: undefined,
+        codeSnapshot: m.codeSnapshot ? "[code]" : undefined,
+      })),
+    };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(lightweight));
+  } catch {
+    // localStorage full or unavailable — silently ignore
+  }
+}
 
 export function useConversationState() {
-  const [state, setState] = useState<ConversationState>({
-    messages: [],
-    hasManualEdits: false,
-    lastGenerationTimestamp: null,
-    pendingMessage: undefined,
+  const [state, setState] = useState<ConversationState>(() => {
+    const persisted = loadPersistedState();
+    return persisted || {
+      messages: [],
+      hasManualEdits: false,
+      lastGenerationTimestamp: null,
+      pendingMessage: undefined,
+    };
   });
+
+  // Persist on every state change
+  useEffect(() => {
+    persistState(state);
+  }, [state]);
 
   // Track the last AI-generated code to detect manual edits
   const lastAiCodeRef = useRef<string>("");
@@ -82,7 +124,6 @@ export function useConversationState() {
   );
 
   const markManualEdit = useCallback((currentCode: string) => {
-    // Only mark as manual edit if code differs from last AI generation
     if (currentCode !== lastAiCodeRef.current && lastAiCodeRef.current !== "") {
       setState((prev) => ({
         ...prev,
@@ -99,6 +140,10 @@ export function useConversationState() {
       lastGenerationTimestamp: null,
       pendingMessage: undefined,
     });
+    if (typeof window !== "undefined") {
+      localStorage.removeItem(STORAGE_KEY);
+      localStorage.removeItem("explainer-code");
+    }
   }, []);
 
   const setPendingMessage = useCallback((skills?: string[]) => {
@@ -118,22 +163,18 @@ export function useConversationState() {
     }));
   }, []);
 
-  // Get full conversation context (excludes error messages)
   const getFullContext = useCallback((): ConversationContextMessage[] => {
-    // Filter out error messages - they're not part of the conversation context for the AI
     return state.messages
       .filter((m) => m.role === "user" || m.role === "assistant")
       .map((m) => ({
         role: m.role as "user" | "assistant",
         content: m.role === "user" ? m.content : "[Generated Code]",
-        // Include attached images for user messages so the AI remembers what was shared
         ...(m.role === "user" && m.attachedImages && m.attachedImages.length > 0
           ? { attachedImages: m.attachedImages }
           : {}),
       }));
   }, [state.messages]);
 
-  // Get all skills that have been used in the conversation (to avoid redundant skill content)
   const getPreviouslyUsedSkills = useCallback((): string[] => {
     const allSkills = new Set<string>();
     state.messages.forEach((m) => {
@@ -144,7 +185,6 @@ export function useConversationState() {
     return Array.from(allSkills);
   }, [state.messages]);
 
-  // Get attached images from the last user message (for retry scenarios)
   const getLastUserAttachedImages = useCallback((): string[] | undefined => {
     for (let i = state.messages.length - 1; i >= 0; i--) {
       const msg = state.messages[i];

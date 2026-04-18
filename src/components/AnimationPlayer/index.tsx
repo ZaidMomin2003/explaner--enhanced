@@ -36,6 +36,8 @@ interface AnimationPlayerProps {
   code: string;
   onRuntimeError?: (error: string) => void;
   onFrameChange?: (frame: number) => void;
+  /** When true, player fills entire container and hides render/settings controls */
+  immersive?: boolean;
 }
 
 export const AnimationPlayer: React.FC<AnimationPlayerProps> = ({
@@ -51,11 +53,10 @@ export const AnimationPlayer: React.FC<AnimationPlayerProps> = ({
   code,
   onRuntimeError,
   onFrameChange,
+  immersive = false,
 }) => {
   const playerRef = useRef<PlayerRef>(null);
 
-  // Listen for runtime errors from the Player's error boundary
-  // Component is included in deps because the Player remounts when Component changes (via key={Component.toString()})
   useEffect(() => {
     const player = playerRef.current;
     if (!player || !onRuntimeError) return;
@@ -70,8 +71,6 @@ export const AnimationPlayer: React.FC<AnimationPlayerProps> = ({
     };
   }, [onRuntimeError, Component]);
 
-  // Listen for frame changes and report to parent
-  // Component is included in deps because the Player remounts when Component changes (via key={Component.toString()})
   useEffect(() => {
     const player = playerRef.current;
     if (!player || !onFrameChange) return;
@@ -86,10 +85,17 @@ export const AnimationPlayer: React.FC<AnimationPlayerProps> = ({
     };
   }, [onFrameChange, Component]);
 
+  // Shared sizing class: immersive fills the whole container, normal uses aspect-ratio
+  const sizeClass = immersive
+    ? "w-full h-full"
+    : "w-full aspect-video max-h-[calc(100%-80px)]";
+
   const renderContent = () => {
     if (isStreaming) {
       return (
-        <div className="w-full aspect-video max-h-[calc(100%-80px)] flex flex-col justify-center items-center gap-4 bg-background-elevated rounded-lg overflow-hidden shadow-[0_0_60px_rgba(0,0,0,0.5)]">
+        <div
+          className={`${sizeClass} flex flex-col justify-center items-center gap-4 bg-background-elevated rounded-lg overflow-hidden shadow-[0_0_60px_rgba(0,0,0,0.5)]`}
+        >
           <div className="w-12 h-12 border-4 border-border border-t-primary rounded-full animate-spin" />
           <p className="text-muted-foreground text-sm">
             Waiting for code generation to finish...
@@ -100,7 +106,9 @@ export const AnimationPlayer: React.FC<AnimationPlayerProps> = ({
 
     if (isCompiling) {
       return (
-        <div className="w-full aspect-video max-h-[calc(100%-80px)] flex justify-center items-center bg-background-elevated rounded-lg overflow-hidden shadow-[0_0_60px_rgba(0,0,0,0.5)]">
+        <div
+          className={`${sizeClass} flex justify-center items-center bg-background-elevated rounded-lg overflow-hidden shadow-[0_0_60px_rgba(0,0,0,0.5)]`}
+        >
           <div className="w-12 h-12 border-4 border-border border-t-primary rounded-full animate-spin" />
         </div>
       );
@@ -119,7 +127,9 @@ export const AnimationPlayer: React.FC<AnimationPlayerProps> = ({
 
     if (!Component) {
       return (
-        <div className="w-full aspect-video max-h-[calc(100%-80px)] flex justify-center items-center bg-background-elevated rounded-lg overflow-hidden shadow-[0_0_60px_rgba(0,0,0,0.5)] text-muted-foreground-dim text-lg font-sans">
+        <div
+          className={`${sizeClass} flex justify-center items-center bg-background-elevated rounded-lg overflow-hidden shadow-[0_0_60px_rgba(0,0,0,0.5)] text-muted-foreground-dim text-lg font-sans`}
+        >
           Select an example to get started
         </div>
       );
@@ -127,7 +137,9 @@ export const AnimationPlayer: React.FC<AnimationPlayerProps> = ({
 
     return (
       <>
-        <div className="w-full aspect-video max-h-[calc(100%-80px)] rounded-lg overflow-hidden shadow-[0_0_60px_rgba(0,0,0,0.5)]">
+        <div
+          className={`${sizeClass} ${immersive ? "" : "rounded-lg"} overflow-hidden ${immersive ? "" : "shadow-[0_0_60px_rgba(0,0,0,0.5)]"}`}
+        >
           <Player
             ref={playerRef}
             key={Component.toString()}
@@ -136,6 +148,7 @@ export const AnimationPlayer: React.FC<AnimationPlayerProps> = ({
             fps={fps}
             compositionHeight={1080}
             compositionWidth={1920}
+            numberOfSharedAudioTags={16}
             style={{
               width: "100%",
               height: "100%",
@@ -149,19 +162,21 @@ export const AnimationPlayer: React.FC<AnimationPlayerProps> = ({
             clickToPlay={false}
           />
         </div>
-        <div className="flex items-center justify-between gap-6 mt-4">
-          <RenderControls
-            code={code}
-            durationInFrames={durationInFrames}
-            fps={fps}
-          />
-          <SettingsModal
-            durationInFrames={durationInFrames}
-            onDurationChange={onDurationChange}
-            fps={fps}
-            onFpsChange={onFpsChange}
-          />
-        </div>
+        {!immersive && (
+          <div className="flex items-center justify-between gap-6 mt-4">
+            <RenderControls
+              code={code}
+              durationInFrames={durationInFrames}
+              fps={fps}
+            />
+            <SettingsModal
+              durationInFrames={durationInFrames}
+              onDurationChange={onDurationChange}
+              fps={fps}
+              onFpsChange={onFpsChange}
+            />
+          </div>
+        )}
       </>
     );
   };

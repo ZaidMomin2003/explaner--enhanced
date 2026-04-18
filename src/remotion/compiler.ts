@@ -1,6 +1,8 @@
 import * as Babel from "@babel/standalone";
+import { loadFont } from "@remotion/google-fonts/Inter";
 import { Lottie } from "@remotion/lottie";
 import * as RemotionShapes from "@remotion/shapes";
+import * as RemotionSfx from "@remotion/sfx";
 import { ThreeCanvas } from "@remotion/three";
 import {
   TransitionSeries,
@@ -15,10 +17,15 @@ import { wipe } from "@remotion/transitions/wipe";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   AbsoluteFill,
+  Easing,
+  Html5Audio,
   Img,
   Sequence,
+  Series,
   interpolate,
+  random,
   spring,
+  staticFile,
   useCurrentFrame,
   useVideoConfig,
 } from "remotion";
@@ -62,14 +69,31 @@ function extractComponentBody(code: string): string {
 
   cleaned = cleaned.trim();
 
-  // Extract body from "export const MyAnimation = () => { ... };"
+  // Also strip "export" keyword — the sandbox doesn't support exports
+  cleaned = cleaned.replace(/^export\s+/, "");
+  // Handle: export default ...
+  cleaned = cleaned.replace(/^export\s+default\s+/, "");
+
+  // Extract body from "const MyAnimation = () => { ... };" (export already stripped)
   const match = cleaned.match(
-    /^([\s\S]*?)export\s+const\s+\w+\s*=\s*\(\s*\)\s*=>\s*\{([\s\S]*)\};?\s*$/,
+    /^([\s\S]*?)(?:export\s+)?const\s+\w+\s*(?::\s*React\.FC\s*)?=\s*\(\s*\)\s*(?::\s*\w+\s*)?=>\s*\{([\s\S]*)\};?\s*$/,
   );
 
   if (match) {
     const helpers = match[1].trim();
     const body = match[2].trim();
+    return helpers ? `${helpers}\n\n${body}` : body;
+  }
+
+  // Fallback: try to strip any remaining export const wrapper
+  const fallbackMatch = cleaned.match(
+    /(?:export\s+)?const\s+\w+\s*=\s*\(\s*\)\s*=>\s*\{([\s\S]*)\};?\s*$/,
+  );
+  if (fallbackMatch) {
+    // Everything before the match is helpers
+    const matchStart = cleaned.indexOf(fallbackMatch[0]);
+    const helpers = cleaned.slice(0, matchStart).trim();
+    const body = fallbackMatch[1].trim();
     return helpers ? `${helpers}\n\n${body}` : body;
   }
 
@@ -97,12 +121,17 @@ export function compileCode(code: string): CompilationResult {
 
     const Remotion = {
       AbsoluteFill,
+      Easing,
+      Html5Audio,
       interpolate,
       useCurrentFrame,
       useVideoConfig,
       spring,
+      random,
       Sequence,
+      Series,
       Img,
+      staticFile,
     };
 
     const wrappedCode = `${transpiled.code}\nreturn DynamicAnimation;`;
@@ -115,16 +144,23 @@ export function compileCode(code: string): CompilationResult {
       "ThreeCanvas",
       "THREE",
       "AbsoluteFill",
+      "Easing",
       "interpolate",
       "useCurrentFrame",
       "useVideoConfig",
       "spring",
+      "random",
       "Sequence",
       "Img",
       "useState",
       "useEffect",
       "useMemo",
       "useRef",
+      "loadFont",
+      "Html5Audio",
+      "Series",
+      "staticFile",
+      "SFX",
       "Rect",
       "Circle",
       "Triangle",
@@ -161,16 +197,23 @@ export function compileCode(code: string): CompilationResult {
       ThreeCanvas,
       THREE,
       AbsoluteFill,
+      Easing,
       interpolate,
       useCurrentFrame,
       useVideoConfig,
       spring,
+      random,
       Sequence,
       Img,
       useState,
       useEffect,
       useMemo,
       useRef,
+      loadFont,
+      Html5Audio,
+      Series,
+      staticFile,
+      RemotionSfx,
       RemotionShapes.Rect,
       RemotionShapes.Circle,
       RemotionShapes.Triangle,

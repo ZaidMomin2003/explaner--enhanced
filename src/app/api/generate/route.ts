@@ -4,7 +4,8 @@ import {
   SKILL_NAMES,
   type SkillName,
 } from "@/skills";
-import { createOpenAI } from "@ai-sdk/openai";
+import { MODELS, HAIKU_MODEL } from "@/types/generation";
+import { createAmazonBedrock } from "@ai-sdk/amazon-bedrock";
 import { generateObject, streamText } from "ai";
 import { z } from "zod";
 
@@ -76,7 +77,8 @@ This allows users to easily customize the animation.
 ## AVAILABLE IMPORTS
 
 \`\`\`tsx
-import { useCurrentFrame, useVideoConfig, AbsoluteFill, interpolate, spring, Sequence } from "remotion";
+import { useCurrentFrame, useVideoConfig, AbsoluteFill, interpolate, spring, Sequence, Series, Easing, random, Img, Html5Audio, staticFile } from "remotion";
+import { loadFont } from "@remotion/google-fonts/Inter";
 import { TransitionSeries, linearTiming, springTiming } from "@remotion/transitions";
 import { fade } from "@remotion/transitions/fade";
 import { slide } from "@remotion/transitions/slide";
@@ -84,6 +86,13 @@ import { Circle, Rect, Triangle, Star, Ellipse, Pie } from "@remotion/shapes";
 import { ThreeCanvas } from "@remotion/three";
 import { useState, useEffect } from "react";
 \`\`\`
+
+## AUDIO (Html5Audio)
+
+You can add audio to animations:
+- \`<Html5Audio src="URL" volume={0.5} />\` for voiceover, music, or SFX
+- SFX object has: SFX.whoosh, SFX.whip, SFX.uiSwitch, SFX.mouseClick, SFX.ding, SFX.pageTurn
+- Wrap in \`<Sequence from={frame}>\` to time audio to specific moments
 
 ## RESERVED NAMES (CRITICAL)
 
@@ -140,8 +149,20 @@ CRITICAL:
 If the user has made manual edits, preserve them unless explicitly asked to change.
 `;
 
+const EditItemSchema = z.object({
+  description: z
+    .string()
+    .describe(
+      "Brief description of this edit, e.g. 'Update background color', 'Increase animation duration'",
+    ),
+  old_string: z
+    .string()
+    .describe("The exact string to find (must match exactly)"),
+  new_string: z.string().describe("The replacement string"),
+});
+
 // Schema for follow-up edit responses
-// Note: Using a flat object schema because OpenAI doesn't support discriminated unions
+// Handles models that return edits as a JSON string instead of an array
 const FollowUpResponseSchema = z.object({
   type: z
     .enum(["edit", "full"])
@@ -154,19 +175,17 @@ const FollowUpResponseSchema = z.object({
       "A brief 1-sentence summary of what changes were made, e.g. 'Changed background color to blue and increased font size'",
     ),
   edits: z
-    .array(
-      z.object({
-        description: z
-          .string()
-          .describe(
-            "Brief description of this edit, e.g. 'Update background color', 'Increase animation duration'",
-          ),
-        old_string: z
-          .string()
-          .describe("The exact string to find (must match exactly)"),
-        new_string: z.string().describe("The replacement string"),
+    .union([
+      z.array(EditItemSchema),
+      z.string().transform((str) => {
+        try {
+          const parsed = JSON.parse(str);
+          return z.array(EditItemSchema).parse(parsed);
+        } catch {
+          return [];
+        }
       }),
-    )
+    ])
     .optional()
     .describe(
       "Required when type is 'edit': array of search-replace operations",
@@ -297,7 +316,7 @@ interface GenerateResponse {
 export async function POST(req: Request) {
   const {
     prompt,
-    model = "gpt-5.2",
+    model = "sonnet-4-6",
     currentCode,
     conversationHistory = [],
     isFollowUp = false,
@@ -307,13 +326,15 @@ export async function POST(req: Request) {
     frameImages,
   }: GenerateRequest = await req.json();
 
-  const apiKey = process.env.OPENAI_API_KEY;
+  const awsKey = process.env.AWS_ACCESS_KEY_ID;
+  const awsSecret = process.env.AWS_SECRET_ACCESS_KEY;
+  const awsRegion = process.env.AWS_REGION;
 
-  if (!apiKey) {
+  if (!awsKey || !awsSecret || !awsRegion) {
     return new Response(
       JSON.stringify({
         error:
-          'The environment variable "OPENAI_API_KEY" is not set. Add it to your .env file and try again.',
+          'AWS Bedrock environment variables (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION) are not set.',
       }),
       {
         status: 400,
@@ -322,16 +343,21 @@ export async function POST(req: Request) {
     );
   }
 
-  // Parse model ID - format can be "model-name" or "model-name:reasoning_effort"
-  const [modelName, reasoningEffort] = model.split(":");
+  // Resolve the Bedrock model ID from the frontend model selection
+  const modelConfig = MODELS.find((m) => m.id === model);
+  const modelName = modelConfig?.bedrockModel ?? "us.anthropic.claude-sonnet-4-6";
 
-  const openai = createOpenAI({ apiKey });
+  const bedrock = createAmazonBedrock({
+    region: awsRegion,
+    accessKeyId: awsKey,
+    secretAccessKey: awsSecret,
+  });
 
   // Validate the prompt first (skip for follow-ups with existing code)
   if (!isFollowUp) {
     try {
       const validationResult = await generateObject({
-        model: openai("gpt-5.2"),
+        model: bedrock(HAIKU_MODEL),
         system: VALIDATION_PROMPT,
         prompt: `User prompt: "${prompt}"`,
         schema: z.object({ valid: z.boolean() }),
@@ -357,7 +383,7 @@ export async function POST(req: Request) {
   let detectedSkills: SkillName[] = [];
   try {
     const skillResult = await generateObject({
-      model: openai("gpt-5.2"),
+      model: bedrock(HAIKU_MODEL),
       system: SKILL_DETECTION_PROMPT,
       prompt: `User prompt: "${prompt}"`,
       schema: z.object({
@@ -488,13 +514,17 @@ Analyze the request and decide: use targeted edits (type: "edit") for small chan
           : "",
       );
 
-      // Build messages array - include images if provided
+      // Build messages array - skip data: URL images for generateObject (it can't download them)
+      // The full code is already in the prompt text, so the AI has all context needed for edits
       const editMessageContent: Array<
         { type: "text"; text: string } | { type: "image"; image: string }
       > = [{ type: "text" as const, text: editPromptText }];
       if (frameImages && frameImages.length > 0) {
         for (const img of frameImages) {
-          editMessageContent.push({ type: "image" as const, image: img });
+          // Only include images with http/https URLs, skip data: URLs
+          if (img.startsWith("http://") || img.startsWith("https://")) {
+            editMessageContent.push({ type: "image" as const, image: img });
+          }
         }
       }
       const editMessages: Array<{
@@ -510,7 +540,7 @@ Analyze the request and decide: use targeted edits (type: "edit") for small chan
       ];
 
       const editResult = await generateObject({
-        model: openai(modelName),
+        model: bedrock(modelName),
         system: FOLLOW_UP_SYSTEM_PROMPT,
         messages: editMessages,
         schema: FollowUpResponseSchema,
@@ -613,16 +643,9 @@ Analyze the request and decide: use targeted edits (type: "edit") for small chan
     ];
 
     const result = streamText({
-      model: openai(modelName),
+      model: bedrock(modelName),
       system: enhancedSystemPrompt,
       messages: initialMessages,
-      ...(reasoningEffort && {
-        providerOptions: {
-          openai: {
-            reasoningEffort: reasoningEffort,
-          },
-        },
-      }),
     });
 
     console.log(
@@ -632,7 +655,6 @@ Analyze the request and decide: use targeted edits (type: "edit") for small chan
       modelName,
       "skills:",
       detectedSkills.length > 0 ? detectedSkills.join(", ") : "general",
-      reasoningEffort ? `reasoning_effort: ${reasoningEffort}` : "",
       hasImages ? `(with ${frameImages.length} image(s))` : "",
     );
 
@@ -678,7 +700,7 @@ Analyze the request and decide: use targeted edits (type: "edit") for small chan
     console.error("Error generating code:", error);
     return new Response(
       JSON.stringify({
-        error: "Something went wrong while trying to reach OpenAI APIs.",
+        error: "Something went wrong while trying to reach Bedrock APIs.",
       }),
       { status: 500, headers: { "Content-Type": "application/json" } },
     );

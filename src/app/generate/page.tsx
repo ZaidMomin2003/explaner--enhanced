@@ -1,37 +1,54 @@
 "use client";
 
-import { Loader2 } from "lucide-react";
+import { Loader2, Code, Play } from "lucide-react";
 import type { NextPage } from "next";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { AnimationPlayer } from "../../components/AnimationPlayer";
-import { ChatSidebar, type ChatSidebarRef } from "../../components/ChatSidebar";
 import { CodeEditor } from "../../components/CodeEditor";
-import { PageLayout } from "../../components/PageLayout";
-import { TabPanel } from "../../components/TabPanel";
+import {
+  FloatingChat,
+  FloatingChatRef,
+  SnapshotNav,
+} from "../../components/FloatingChat";
+import { GenerateHeader } from "../../components/GenerateHeader";
+import { RenderControls } from "../../components/AnimationPlayer/RenderControls";
+import { SettingsModal } from "../../components/AnimationPlayer/SettingsModal";
 import { examples } from "../../examples/code";
 import { useAnimationState } from "../../hooks/useAnimationState";
 import { useAutoCorrection } from "../../hooks/useAutoCorrection";
 import { useConversationState } from "../../hooks/useConversationState";
+import { cn } from "../../lib/utils";
 import type {
   AssistantMetadata,
   EditOperation,
   ErrorCorrectionContext,
 } from "../../types/conversation";
 import type { GenerationErrorType, StreamPhase } from "../../types/generation";
+import { detectDurationFromCode } from "../../helpers/sanitize-response";
 
 const MAX_CORRECTION_ATTEMPTS = 3;
+const GEN_CODE_KEY = "generate-code";
+const GEN_DURATION_KEY = "generate-duration";
+
+type ViewMode = "preview" | "code";
 
 function GeneratePageContent() {
   const searchParams = useSearchParams();
   const initialPrompt = searchParams.get("prompt") || "";
-
-  // If we have an initial prompt from URL, start in streaming state
-  // so syntax highlighting is disabled from the beginning
   const willAutoStart = Boolean(initialPrompt);
 
+  const persistedCode =
+    typeof window !== "undefined" ? localStorage.getItem(GEN_CODE_KEY) : null;
+  const persistedDuration =
+    typeof window !== "undefined"
+      ? localStorage.getItem(GEN_DURATION_KEY)
+      : null;
+
   const [durationInFrames, setDurationInFrames] = useState(
-    examples[0]?.durationInFrames || 150,
+    persistedDuration
+      ? parseInt(persistedDuration, 10)
+      : examples[0]?.durationInFrames || 150,
   );
   const [fps, setFps] = useState(examples[0]?.fps || 30);
   const [currentFrame, setCurrentFrame] = useState(0);
@@ -41,18 +58,20 @@ function GeneratePageContent() {
   );
   const [prompt, setPrompt] = useState(initialPrompt);
   const [hasAutoStarted, setHasAutoStarted] = useState(false);
-  const [hasGeneratedOnce, setHasGeneratedOnce] = useState(false);
+  const [hasGeneratedOnce, setHasGeneratedOnce] = useState(
+    !!persistedCode && !willAutoStart,
+  );
   const [generationError, setGenerationError] = useState<{
     message: string;
     type: GenerationErrorType;
     failedEdit?: EditOperation;
   } | null>(null);
-
-  // Self-correction state
   const [errorCorrection, setErrorCorrection] =
     useState<ErrorCorrectionContext | null>(null);
 
-  // Conversation state for follow-up edits
+  const [isUIVisible, setIsUIVisible] = useState(false);
+  const [viewMode, setViewMode] = useState<ViewMode>("preview");
+
   const {
     messages,
     hasManualEdits,
@@ -69,9 +88,6 @@ function GeneratePageContent() {
     isFirstGeneration,
   } = useConversationState();
 
-  // Sidebar collapse state
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
-
   const {
     code,
     Component,
@@ -79,21 +95,18 @@ function GeneratePageContent() {
     isCompiling,
     setCode,
     compileCode,
-  } = useAnimationState(examples[0]?.code || "");
+  } = useAnimationState(
+    (!willAutoStart && persistedCode) || examples[0]?.code || "",
+  );
 
-  // Runtime errors from the Player (e.g., "cannot access variable before initialization")
   const [runtimeError, setRuntimeError] = useState<string | null>(null);
-
-  // Combined error for display - either compilation or runtime error
   const codeError = compilationError || runtimeError;
 
-  // Refs
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isStreamingRef = useRef(isStreaming);
   const codeRef = useRef(code);
-  const chatSidebarRef = useRef<ChatSidebarRef>(null);
+  const floatingChatRef = useRef<FloatingChatRef>(null);
 
-  // Auto-correction hook - use combined code error (compilation + runtime)
   const { markAsAiGenerated, markAsUserEdited } = useAutoCorrection({
     maxAttempts: MAX_CORRECTION_ATTEMPTS,
     compilationError: codeError,
@@ -107,12 +120,9 @@ function GeneratePageContent() {
       (correctionPrompt: string, context: ErrorCorrectionContext) => {
         setErrorCorrection(context);
         setPrompt(correctionPrompt);
-        // Get attached images from the last user message to include in retry
         const lastImages = getLastUserAttachedImages();
         setTimeout(() => {
-          // Use silent mode to avoid showing retry as a user message
-          // Include images from the last user message so image-based requests can be retried
-          chatSidebarRef.current?.triggerGeneration({
+          floatingChatRef.current?.triggerGeneration({
             silent: true,
             attachedImages: lastImages,
           });
@@ -125,7 +135,6 @@ function GeneratePageContent() {
     onClearErrorCorrection: useCallback(() => setErrorCorrection(null), []),
   });
 
-  // Sync refs
   useEffect(() => {
     codeRef.current = code;
   }, [code]);
@@ -133,11 +142,21 @@ function GeneratePageContent() {
   useEffect(() => {
     const wasStreaming = isStreamingRef.current;
     isStreamingRef.current = isStreaming;
-
-    // Compile when streaming ends - mark as AI change
     if (wasStreaming && !isStreaming) {
       markAsAiGenerated();
       compileCode(codeRef.current);
+      const detected = detectDurationFromCode(
+        codeRef.current,
+        durationInFrames,
+      );
+      if (detected !== durationInFrames) {
+        setDurationInFrames(detected);
+        try {
+          localStorage.setItem(GEN_DURATION_KEY, String(detected));
+        } catch {
+          /* ignore */
+        }
+      }
     }
   }, [isStreaming, compileCode, markAsAiGenerated]);
 
@@ -145,32 +164,22 @@ function GeneratePageContent() {
     (newCode: string) => {
       setCode(newCode);
       setHasGeneratedOnce(true);
-
-      // Mark as manual edit if not streaming (user typing)
+      try {
+        localStorage.setItem(GEN_CODE_KEY, newCode);
+      } catch {
+        /* ignore */
+      }
       if (!isStreamingRef.current) {
         markManualEdit(newCode);
         markAsUserEdited();
       }
-
-      // Clear existing debounce
-      if (debounceRef.current) {
-        clearTimeout(debounceRef.current);
-      }
-
-      // Skip compilation while streaming - will compile when streaming ends
-      if (isStreamingRef.current) {
-        return;
-      }
-
-      // Set new debounce
-      debounceRef.current = setTimeout(() => {
-        compileCode(newCode);
-      }, 500);
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      if (isStreamingRef.current) return;
+      debounceRef.current = setTimeout(() => compileCode(newCode), 500);
     },
     [setCode, compileCode, markManualEdit, markAsUserEdited],
   );
 
-  // Handle message sent for history
   const handleMessageSent = useCallback(
     (promptText: string, attachedImages?: string[]) => {
       addUserMessage(promptText, attachedImages);
@@ -178,33 +187,31 @@ function GeneratePageContent() {
     [addUserMessage],
   );
 
-  // Handle generation complete for history
   const handleGenerationComplete = useCallback(
     (generatedCode: string, summary?: string, metadata?: AssistantMetadata) => {
-      const content =
-        summary || "Generated your animation, any follow up edits?";
-      addAssistantMessage(content, generatedCode, metadata);
+      addAssistantMessage(
+        summary || "Generated your animation, any follow up edits?",
+        generatedCode,
+        metadata,
+      );
       markAsAiGenerated();
+      const detected = detectDurationFromCode(generatedCode, durationInFrames);
+      if (detected !== durationInFrames) setDurationInFrames(detected);
     },
-    [addAssistantMessage, markAsAiGenerated],
+    [addAssistantMessage, markAsAiGenerated, durationInFrames],
   );
 
-  // Cleanup debounce on unmount
   useEffect(() => {
     return () => {
-      if (debounceRef.current) {
-        clearTimeout(debounceRef.current);
-      }
+      if (debounceRef.current) clearTimeout(debounceRef.current);
     };
   }, []);
 
   const handleStreamingChange = useCallback((streaming: boolean) => {
     setIsStreaming(streaming);
-    // Clear errors when starting a new generation
     if (streaming) {
       setGenerationError(null);
       setRuntimeError(null);
-      // Reset error correction state for fresh retry attempts
       setErrorCorrection(null);
     }
   }, []);
@@ -220,30 +227,42 @@ function GeneratePageContent() {
     [],
   );
 
-  // Handle runtime errors from the Player (e.g., "cannot access variable before initialization")
   const handleRuntimeError = useCallback((errorMessage: string) => {
-    // Set runtime error - this will be combined with compilation errors via codeError
-    // The useAutoCorrection hook will pick this up via the compilationError prop
     setRuntimeError(errorMessage);
   }, []);
 
-  // Auto-trigger generation if prompt came from URL
+  const handleRestoreSnapshot = useCallback(
+    (snapshotCode: string) => {
+      setCode(snapshotCode);
+      compileCode(snapshotCode);
+      try {
+        localStorage.setItem(GEN_CODE_KEY, snapshotCode);
+      } catch {
+        /* ignore */
+      }
+    },
+    [setCode, compileCode],
+  );
+
+  const handleUIOpen = useCallback((open: boolean) => {
+    setIsUIVisible(open);
+  }, []);
+
   useEffect(() => {
-    if (initialPrompt && !hasAutoStarted && chatSidebarRef.current) {
+    if (initialPrompt && !hasAutoStarted && floatingChatRef.current) {
       setHasAutoStarted(true);
-      // Check for initial attached images from sessionStorage
       const storedImagesJson = sessionStorage.getItem("initialAttachedImages");
       let storedImages: string[] | undefined;
       if (storedImagesJson) {
         try {
           storedImages = JSON.parse(storedImagesJson);
         } catch {
-          // Ignore parse errors
+          /* ignore */
         }
         sessionStorage.removeItem("initialAttachedImages");
       }
       setTimeout(() => {
-        chatSidebarRef.current?.triggerGeneration({
+        floatingChatRef.current?.triggerGeneration({
           attachedImages: storedImages,
         });
       }, 100);
@@ -251,78 +270,151 @@ function GeneratePageContent() {
   }, [initialPrompt, hasAutoStarted]);
 
   return (
-    <PageLayout showLogoAsLink>
-      <div className="flex-1 flex flex-col min-[1000px]:flex-row min-w-0 overflow-hidden">
-        {/* Chat History Sidebar */}
-        <ChatSidebar
-          ref={chatSidebarRef}
-          messages={messages}
-          pendingMessage={pendingMessage}
-          isCollapsed={isSidebarCollapsed}
-          onToggleCollapse={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
-          hasManualEdits={hasManualEdits}
-          // Generation props for embedded input
-          onCodeGenerated={handleCodeChange}
-          onStreamingChange={handleStreamingChange}
-          onStreamPhaseChange={setStreamPhase}
-          onError={handleError}
-          prompt={prompt}
-          onPromptChange={setPrompt}
-          currentCode={code}
-          conversationHistory={getFullContext()}
-          previouslyUsedSkills={getPreviouslyUsedSkills()}
-          isFollowUp={!isFirstGeneration}
-          onMessageSent={handleMessageSent}
-          onGenerationComplete={handleGenerationComplete}
-          onErrorMessage={addErrorMessage}
-          errorCorrection={errorCorrection ?? undefined}
-          onPendingMessage={setPendingMessage}
-          onClearPendingMessage={clearPendingMessage}
-          // Frame capture props
-          Component={Component}
-          fps={fps}
-          durationInFrames={durationInFrames}
-          currentFrame={currentFrame}
-        />
+    <div className="h-screen w-screen bg-[#f7f7f8] overflow-hidden relative generate-light-theme">
+      {/* ===== LAYER 0: Full-screen video/code ===== */}
+      <div className="absolute inset-0">
+        {viewMode === "preview" ? (
+          <AnimationPlayer
+            Component={generationError ? null : Component}
+            durationInFrames={durationInFrames}
+            fps={fps}
+            onDurationChange={setDurationInFrames}
+            onFpsChange={setFps}
+            isCompiling={isCompiling}
+            isStreaming={isStreaming}
+            error={generationError?.message || codeError}
+            errorType={generationError?.type || "compilation"}
+            code={code}
+            onRuntimeError={handleRuntimeError}
+            onFrameChange={setCurrentFrame}
+            immersive
+          />
+        ) : (
+          <CodeEditor
+            code={hasGeneratedOnce && !generationError ? code : ""}
+            onChange={handleCodeChange}
+            isStreaming={isStreaming}
+            streamPhase={streamPhase}
+          />
+        )}
+      </div>
 
-        {/* Main content area */}
-        <div className="flex-1 flex flex-col min-w-0 pr-12 pb-8 overflow-hidden">
-          <TabPanel
-            codeContent={
-              <CodeEditor
-                code={hasGeneratedOnce && !generationError ? code : ""}
-                onChange={handleCodeChange}
-                isStreaming={isStreaming}
-                streamPhase={streamPhase}
-              />
-            }
-            previewContent={
-              <AnimationPlayer
-                Component={generationError ? null : Component}
+      {/* ===== LAYER 1: UI Overlay ===== */}
+      {isUIVisible && (
+        <>
+          {/* Top bar: Logo + Tabs + Undo/Redo */}
+          <div className="absolute top-0 left-0 right-0 z-40 pointer-events-none">
+            <div className="flex items-center justify-between px-4 py-3">
+              {/* Left group */}
+              <div className="flex items-center gap-3 pointer-events-auto">
+                <div className="bg-white/90 backdrop-blur-xl rounded-xl border border-gray-200/60 shadow-sm px-3 py-2">
+                  <GenerateHeader />
+                </div>
+
+                {/* Tab switcher */}
+                <div className="flex rounded-xl overflow-hidden border border-gray-200/60 bg-white/90 backdrop-blur-xl shadow-sm">
+                  <button
+                    onClick={() => setViewMode("code")}
+                    className={cn(
+                      "flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium transition-colors cursor-pointer",
+                      viewMode === "code"
+                        ? "bg-red-600 text-white"
+                        : "text-gray-500 hover:text-gray-800 hover:bg-gray-50",
+                    )}
+                  >
+                    <Code className="w-3.5 h-3.5" />
+                    Code
+                  </button>
+                  <button
+                    onClick={() => setViewMode("preview")}
+                    className={cn(
+                      "flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium transition-colors border-l border-gray-200/60 cursor-pointer",
+                      viewMode === "preview"
+                        ? "bg-red-600 text-white"
+                        : "text-gray-500 hover:text-gray-800 hover:bg-gray-50",
+                    )}
+                  >
+                    <Play className="w-3.5 h-3.5" />
+                    Preview
+                  </button>
+                </div>
+              </div>
+
+              {/* Right group: Undo/Redo */}
+              <div className="pointer-events-auto">
+                <SnapshotNav
+                  messages={messages}
+                  onRestoreSnapshot={handleRestoreSnapshot}
+                  isStreaming={isStreaming}
+                  variant="light"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Bottom-left: Render controls */}
+          <div className="absolute bottom-4 left-4 z-40">
+            <div className="bg-white/90 backdrop-blur-xl rounded-xl border border-gray-200/60 shadow-sm p-2">
+              <RenderControls
+                code={code}
                 durationInFrames={durationInFrames}
                 fps={fps}
-                onDurationChange={setDurationInFrames}
-                onFpsChange={setFps}
-                isCompiling={isCompiling}
-                isStreaming={isStreaming}
-                error={generationError?.message || codeError}
-                errorType={generationError?.type || "compilation"}
-                code={code}
-                onRuntimeError={handleRuntimeError}
-                onFrameChange={setCurrentFrame}
               />
-            }
-          />
-        </div>
-      </div>
-    </PageLayout>
+            </div>
+          </div>
+
+          {/* Bottom-right: Settings */}
+          <div className="absolute bottom-4 right-4 z-40">
+            <div className="bg-white/90 backdrop-blur-xl rounded-xl border border-gray-200/60 shadow-sm p-2">
+              <SettingsModal
+                durationInFrames={durationInFrames}
+                onDurationChange={setDurationInFrames}
+                fps={fps}
+                onFpsChange={setFps}
+              />
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* ===== LAYER 2: Chat ===== */}
+      <FloatingChat
+        ref={floatingChatRef}
+        messages={messages}
+        pendingMessage={pendingMessage}
+        hasManualEdits={hasManualEdits}
+        isOpen={isUIVisible}
+        onOpenChange={handleUIOpen}
+        onCodeGenerated={handleCodeChange}
+        onStreamingChange={handleStreamingChange}
+        onStreamPhaseChange={setStreamPhase}
+        onError={handleError}
+        prompt={prompt}
+        onPromptChange={setPrompt}
+        currentCode={code}
+        conversationHistory={getFullContext()}
+        previouslyUsedSkills={getPreviouslyUsedSkills()}
+        isFollowUp={!isFirstGeneration}
+        onMessageSent={handleMessageSent}
+        onGenerationComplete={handleGenerationComplete}
+        onErrorMessage={addErrorMessage}
+        errorCorrection={errorCorrection ?? undefined}
+        onPendingMessage={setPendingMessage}
+        onClearPendingMessage={clearPendingMessage}
+        Component={Component}
+        fps={fps}
+        durationInFrames={durationInFrames}
+        currentFrame={currentFrame}
+        variant="light"
+      />
+    </div>
   );
 }
 
 function LoadingFallback() {
   return (
-    <div className="flex h-screen w-screen items-center justify-center bg-background">
-      <Loader2 className="w-8 h-8 animate-spin text-foreground" />
+    <div className="flex h-screen w-screen items-center justify-center bg-[#f7f7f8]">
+      <Loader2 className="w-8 h-8 animate-spin text-red-600" />
     </div>
   );
 }

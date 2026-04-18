@@ -1,6 +1,8 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
 :root {
   --unfocused-border-color: #333;
 
@@ -37,9 +39,15 @@
   --border-dim: #222;
   --input: #0f0f0f;
   --ring: #333;
+  --card: #0a0a0a;
+  --card-foreground: #ffffff;
+
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
 }
 
 @theme {
+  --font-sans: var(--font-sans);
+  --font-script: var(--font-great-vibes), cursive;
   --color-foreground: var(--foreground);
   --color-background: var(--background);
   --color-unfocused-border-color: var(--unfocused-border-color);
@@ -69,12 +77,41 @@
       transform: rotate(360deg);
     }
   }
+
+  @keyframes marquee {
+    0% {
+      transform: translateX(0);
+    }
+    100% {
+      transform: translateX(-50%);
+    }
+  }
+
+  @keyframes accordion-down {
+    from {
+      height: 0;
+    }
+    to {
+      height: var(--radix-accordion-content-height);
+    }
+  }
+
+  @keyframes accordion-up {
+    from {
+      height: var(--radix-accordion-content-height);
+    }
+    to {
+      height: 0;
+    }
+  }
+
+  --animate-accordion-down: accordion-down 0.2s ease-out;
+  --animate-accordion-up: accordion-up 0.2s ease-out;
 }
 
 body {
   margin: 0;
   padding: 0;
-  overflow: hidden;
 }
 
 @theme inline {
@@ -104,6 +141,8 @@ body {
   --color-border-dim: var(--border-dim);
   --color-input: var(--input);
   --color-ring: var(--ring);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
 }
 
 @layer base {
@@ -113,4 +152,25 @@ body {
   body {
     @apply bg-background text-foreground;
   }
+}
+
+/* ===== Light theme overrides for /generate chat panel ===== */
+.chat-light-theme {
+  --background: #ffffff;
+  --background-elevated: #f5f5f5;
+  --foreground: #1a1a1a;
+  --primary: #dc2626;
+  --primary-hover: #b91c1c;
+  --primary-foreground: #ffffff;
+  --secondary: #f0f0f0;
+  --secondary-foreground: #1a1a1a;
+  --muted: #fafafa;
+  --muted-foreground: #6b7280;
+  --muted-foreground-dim: #9ca3af;
+  --accent: #f5f5f5;
+  --accent-foreground: #1a1a1a;
+  --border: #e5e5e5;
+  --border-dim: #f0f0f0;
+  --input: #f9f9f9;
+  --ring: #e5e5e5;
 }

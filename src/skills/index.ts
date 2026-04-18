@@ -1,14 +1,6 @@
+import fs from "fs";
+import path from "path";
 import { examples } from "@/examples/code";
-
-// Import markdown files at build time
-import threeDSkill from "./3d.md";
-import chartsSkill from "./charts.md";
-import messagingSkill from "./messaging.md";
-import sequencingSkill from "./sequencing.md";
-import socialMediaSkill from "./social-media.md";
-import springPhysicsSkill from "./spring-physics.md";
-import transitionsSkill from "./transitions.md";
-import typographySkill from "./typography.md";
 
 // Guidance skills (markdown files with patterns/rules)
 const GUIDANCE_SKILLS = [
@@ -20,6 +12,7 @@ const GUIDANCE_SKILLS = [
   "transitions",
   "sequencing",
   "spring-physics",
+  "saas-explainer",
 ] as const;
 
 // Example skills (complete working code references)
@@ -39,17 +32,32 @@ export const SKILL_NAMES = [...GUIDANCE_SKILLS, ...EXAMPLE_SKILLS] as const;
 
 export type SkillName = (typeof SKILL_NAMES)[number];
 
-// Map guidance skill names to imported content
-const guidanceSkillContent: Record<(typeof GUIDANCE_SKILLS)[number], string> = {
-  charts: chartsSkill,
-  typography: typographySkill,
-  "social-media": socialMediaSkill,
-  messaging: messagingSkill,
-  "3d": threeDSkill,
-  transitions: transitionsSkill,
-  sequencing: sequencingSkill,
-  "spring-physics": springPhysicsSkill,
+// Map guidance skill names to markdown file names
+const guidanceSkillFiles: Record<(typeof GUIDANCE_SKILLS)[number], string> = {
+  charts: "charts.md",
+  typography: "typography.md",
+  "social-media": "social-media.md",
+  messaging: "messaging.md",
+  "3d": "3d.md",
+  transitions: "transitions.md",
+  sequencing: "sequencing.md",
+  "spring-physics": "spring-physics.md",
+  "saas-explainer": "saas-explainer.md",
 };
+
+// Read markdown skill files at runtime (server-side only)
+function getGuidanceSkillContent(
+  skill: (typeof GUIDANCE_SKILLS)[number],
+): string {
+  const fileName = guidanceSkillFiles[skill];
+  if (!fileName) return "";
+  try {
+    const filePath = path.join(process.cwd(), "src", "skills", fileName);
+    return fs.readFileSync(filePath, "utf-8");
+  } catch {
+    return "";
+  }
+}
 
 // Map example skill names to example IDs
 const exampleIdMap: Record<(typeof EXAMPLE_SKILLS)[number], string> = {
@@ -76,9 +84,9 @@ export function getSkillContent(skillName: SkillName): string {
     return "";
   }
 
-  // Handle guidance skills - return imported markdown content
-  return (
-    guidanceSkillContent[skillName as (typeof GUIDANCE_SKILLS)[number]] || ""
+  // Handle guidance skills - read markdown content from filesystem
+  return getGuidanceSkillContent(
+    skillName as (typeof GUIDANCE_SKILLS)[number],
   );
 }
 
@@ -106,6 +114,7 @@ Guidance categories (patterns and rules):
 - transitions: scene changes, fades between clips, slide transitions, wipes, multiple scenes
 - sequencing: multiple elements appearing at different times, staggered animations, choreographed entrances
 - spring-physics: bouncy animations, organic motion, elastic effects, overshoot animations
+- saas-explainer: SaaS product videos, explainer videos, product demos, feature showcases, startup pitches, app walkthroughs
 
 Code examples (complete working references):
 - example-histogram: animated bar chart with spring animations and @remotion/shapes
