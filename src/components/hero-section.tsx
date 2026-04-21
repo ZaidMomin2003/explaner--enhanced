@@ -41,11 +41,25 @@ export default function HeroSection() {
         <>
             <HeroHeader />
             <main className="overflow-hidden">
+                {/* Grid background — spans entire page, fades behind content */}
+                <div
+                    aria-hidden
+                    className="pointer-events-none fixed inset-0 z-0"
+                    style={{
+                        backgroundImage:
+                            'linear-gradient(to right, rgba(255,255,255,0.06) 1px, transparent 1px), linear-gradient(to bottom, rgba(255,255,255,0.06) 1px, transparent 1px)',
+                        backgroundSize: '60px 60px',
+                        maskImage: 'radial-gradient(ellipse at 50% 30%, black 0%, transparent 60%)',
+                        WebkitMaskImage: 'radial-gradient(ellipse at 50% 30%, black 0%, transparent 60%)',
+                    }}
+                />
+
+                {/* Aurora — hero area only */}
                 <div
                     aria-hidden
                     className="pointer-events-none absolute inset-0 h-[100vh] overflow-hidden">
                     <Aurora
-                        colorStops={['#3B82F6', '#8B5CF6', '#3B82F6']}
+                        colorStops={['#DC2626', '#991B1B', '#DC2626']}
                         blend={0.6}
                         amplitude={1.2}
                         speed={0.5}
@@ -61,7 +75,7 @@ export default function HeroSection() {
                                     <Link
                                         href="/signup"
                                         className="hover:bg-background dark:hover:border-t-border bg-muted group mx-auto flex w-fit items-center gap-4 rounded-full border p-1 pl-4 shadow-md shadow-zinc-950/5 transition-colors duration-300 dark:border-t-white/5 dark:shadow-zinc-950">
-                                        <span className="text-foreground text-sm">Funded by AWS Startups</span>
+                                        <span className="text-foreground text-sm">Powered by Claude Opus 4.7</span>
                                         <span className="dark:border-background block h-4 w-0.5 border-l bg-white dark:bg-zinc-700"></span>
 
                                         <div className="bg-background group-hover:bg-muted size-6 overflow-hidden rounded-full duration-500">

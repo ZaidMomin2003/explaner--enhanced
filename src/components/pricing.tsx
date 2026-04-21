@@ -7,7 +7,7 @@ export default function Pricing() {
         <div className="relative py-16 md:py-32" id="pricing">
             <div className="mx-auto max-w-5xl px-6">
                 <div className="mx-auto max-w-2xl text-center">
-                    <h2 className="text-balance text-3xl font-bold md:text-4xl lg:text-5xl">The studio grade of video generation</h2>
+                    <h2 className="text-balance text-3xl font-bold md:text-4xl lg:text-5xl">The <span className="text-primary">studio grade</span> of video generation</h2>
                 </div>
 
                 <div className="mt-8 md:mt-20">

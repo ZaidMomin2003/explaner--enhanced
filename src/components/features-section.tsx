@@ -9,7 +9,7 @@ export default function FeaturesSection() {
     return (
         <section className="px-4 py-16 md:py-32" id="how-it-works">
             <div className="mx-auto mb-12 max-w-2xl text-center">
-                <h2 className="text-balance text-3xl font-bold md:text-4xl lg:text-5xl">Built for speed, designed for creators</h2>
+                <h2 className="text-balance text-3xl font-bold md:text-4xl lg:text-5xl">Built for <span className="text-primary">speed</span>, designed for <span className="text-primary">creators</span></h2>
                 <p className="mt-4 text-muted-foreground">From cloud rendering to AI-powered editing, every piece of the pipeline is optimized so you can ship faster.</p>
             </div>
             <div className="mx-auto grid max-w-5xl border md:grid-cols-2">
@@ -64,7 +64,7 @@ export default function FeaturesSection() {
                         </div>
 
                         <div>
-                            <div className="rounded-(--radius) mb-1 ml-auto w-3/5 bg-blue-600 p-3 text-xs text-white">
+                            <div className="rounded-(--radius) mb-1 ml-auto w-3/5 bg-red-500 p-3 text-xs text-white">
                                 Done! I&apos;ve repositioned the hero with a spring fade-in animation and updated the timeline.
                             </div>
                             <span className="text-muted-foreground block text-right text-xs">Now</span>
@@ -126,11 +126,11 @@ const Map = () => {
 const chartConfig = {
     desktop: {
         label: 'Desktop',
-        color: '#2563eb',
+        color: '#DC2626',
     },
     mobile: {
         label: 'Mobile',
-        color: '#60a5fa',
+        color: '#F87171',
     },
 } satisfies ChartConfig
 
